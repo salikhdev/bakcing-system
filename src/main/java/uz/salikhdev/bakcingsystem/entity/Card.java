@@ -27,4 +27,7 @@ public class Card {
 
     @Enumerated(EnumType.STRING)
     private CardType type;
+
+    @Enumerated(EnumType.STRING)
+    private CardStatus status;
 }

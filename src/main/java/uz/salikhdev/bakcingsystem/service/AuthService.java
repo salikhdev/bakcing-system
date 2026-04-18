@@ -13,6 +13,9 @@ import uz.salikhdev.bakcingsystem.entity.Role;
 import uz.salikhdev.bakcingsystem.entity.User;
 import uz.salikhdev.bakcingsystem.entity.UserStatus;
 import uz.salikhdev.bakcingsystem.entity.UserType;
+import uz.salikhdev.bakcingsystem.exception.AlreadyExistsException;
+import uz.salikhdev.bakcingsystem.exception.BadRequestException;
+import uz.salikhdev.bakcingsystem.exception.NotFoundException;
 import uz.salikhdev.bakcingsystem.repository.UserRepository;
 import uz.salikhdev.bakcingsystem.security.JwtService;
 
@@ -28,7 +31,7 @@ public class AuthService {
     public AuthResponse register(RegisterRequest request) {
 
         if (userRepository.existsByPhone(request.getPhone())) {
-            throw new RuntimeException("Phone number already registered");
+            throw new AlreadyExistsException("Phone number already registered");
         }
 
         User user = User.builder()
@@ -56,7 +59,7 @@ public class AuthService {
         );
 
         User user = userRepository.findByPhone(request.getPhone())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new NotFoundException("Foydalanuvchi topilmadi"));
 
         return AuthResponse.builder()
                 .accessToken(jwtService.generateAccessToken(user))
@@ -69,10 +72,10 @@ public class AuthService {
         String username = jwtService.extractUsername(refreshToken);
 
         User user = userRepository.findByPhone(username)
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new NotFoundException("Foydalanuvchi topilmadi"));
 
         if (!jwtService.isTokenValid(refreshToken, user) || !jwtService.isRefreshToken(refreshToken)) {
-            throw new RuntimeException("Invalid refresh token");
+            throw new BadRequestException("Refresh token yaroqsiz");
         }
 
         return AuthResponse.builder()

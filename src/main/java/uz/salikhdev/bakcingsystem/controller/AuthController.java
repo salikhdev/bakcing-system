@@ -1,5 +1,6 @@
 package uz.salikhdev.bakcingsystem.controller;
 
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -15,6 +16,7 @@ import uz.salikhdev.bakcingsystem.service.AuthService;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
+@Tag(name = "Auth")
 public class AuthController {
 
     private final AuthService authService;

@@ -27,6 +27,9 @@ public class Account {
     private String currency;
 
     @Enumerated(EnumType.STRING)
+    private AccountStatus status;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "owner_type")
     private OwnerType ownerType;
 

@@ -90,7 +90,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private void sendError(HttpServletResponse response, HttpStatus status, String message) throws IOException {
         ErrorResponse errorResponse = ErrorResponse.builder()
                 .status(status.value())
-                .error(status.getReasonPhrase())
+                .code(status.getReasonPhrase())
                 .message(message)
                 .build();
 

@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class ErrorResponse {
     private int status;
-    private String error;
+    private String code;
     private String message;
     @Builder.Default
     private LocalDateTime timestamp = LocalDateTime.now();

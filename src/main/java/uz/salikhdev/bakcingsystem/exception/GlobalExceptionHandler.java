@@ -2,6 +2,7 @@ package uz.salikhdev.bakcingsystem.exception;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.LockedException;
@@ -12,31 +13,56 @@ import uz.salikhdev.bakcingsystem.dto.ErrorResponse;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    @ExceptionHandler(NotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(NotFoundException e) {
+        return buildResponse(HttpStatus.NOT_FOUND, "NOT_FOUND", e.getMessage());
+    }
+
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<ErrorResponse> handleBadRequest(BadRequestException e) {
+        return buildResponse(HttpStatus.BAD_REQUEST, "BAD_REQUEST", e.getMessage());
+    }
+
+    @ExceptionHandler(AlreadyExistsException.class)
+    public ResponseEntity<ErrorResponse> handleAlreadyExists(AlreadyExistsException e) {
+        return buildResponse(HttpStatus.CONFLICT, "ALREADY_EXISTS", e.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(ForbiddenException e) {
+        return buildResponse(HttpStatus.FORBIDDEN, "FORBIDDEN", e.getMessage());
+    }
+
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<ErrorResponse> handleBadCredentials(BadCredentialsException e) {
-        return buildResponse(HttpStatus.UNAUTHORIZED, "Telefon raqam yoki parol noto'g'ri");
+        return buildResponse(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "Telefon raqam yoki parol noto'g'ri");
     }
 
     @ExceptionHandler(LockedException.class)
     public ResponseEntity<ErrorResponse> handleLocked(LockedException e) {
-        return buildResponse(HttpStatus.FORBIDDEN, "Foydalanuvchi bloklangan");
+        return buildResponse(HttpStatus.FORBIDDEN, "USER_LOCKED", "Foydalanuvchi bloklangan");
     }
 
     @ExceptionHandler(DisabledException.class)
     public ResponseEntity<ErrorResponse> handleDisabled(DisabledException e) {
-        return buildResponse(HttpStatus.FORBIDDEN, "Foydalanuvchi faol emas");
+        return buildResponse(HttpStatus.FORBIDDEN, "USER_DISABLED", "Foydalanuvchi faol emas");
     }
 
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<ErrorResponse> handleRuntime(RuntimeException e) {
-        return buildResponse(HttpStatus.BAD_REQUEST, e.getMessage());
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException e) {
+        return buildResponse(HttpStatus.FORBIDDEN, "ACCESS_DENIED", "Ruxsat berilmagan");
     }
 
-    private ResponseEntity<ErrorResponse> buildResponse(HttpStatus status, String message) {
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleGeneral(Exception e) {
+        return buildResponse(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR", "Ichki server xatoligi");
+    }
+
+    private ResponseEntity<ErrorResponse> buildResponse(HttpStatus status, String code, String message) {
         return ResponseEntity.status(status).body(
                 ErrorResponse.builder()
                         .status(status.value())
-                        .error(status.getReasonPhrase())
+                        .code(code)
                         .message(message)
                         .build()
         );
