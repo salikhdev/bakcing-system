@@ -1,0 +1,210 @@
+package uz.salikhdev.bakcingsystem.service;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import uz.salikhdev.bakcingsystem.dto.*;
+import uz.salikhdev.bakcingsystem.entity.*;
+import uz.salikhdev.bakcingsystem.exception.BadRequestException;
+import uz.salikhdev.bakcingsystem.exception.NotFoundException;
+import uz.salikhdev.bakcingsystem.repository.AccountRepository;
+import uz.salikhdev.bakcingsystem.repository.CardRepository;
+import uz.salikhdev.bakcingsystem.repository.TransactionRepository;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Service
+@RequiredArgsConstructor
+public class TransactionService {
+
+    private final TransactionRepository transactionRepository;
+    private final AccountRepository accountRepository;
+    private final CardRepository cardRepository;
+
+    private static final BigDecimal CARD_TRANSFER_FEE_RATE = new BigDecimal("0.01"); // 1%
+    private static final BigDecimal WITHDRAWAL_FEE_RATE = new BigDecimal("0.005");   // 0.5%
+    private static final BigDecimal MIN_CARD_TRANSFER_FEE = new BigDecimal("500");
+
+    @Transactional
+    public TransactionResponse cardTransfer(CardTransferRequest request) {
+        validateAmount(request.getAmount());
+
+        if (request.getFromCardNumber().equals(request.getToCardNumber())) {
+            throw new BadRequestException("O'ziga o'zi o'tkazma qilib bo'lmaydi");
+        }
+
+        Card fromCard = cardRepository.findByCardNumber(request.getFromCardNumber())
+                .orElseThrow(() -> new NotFoundException("Jo'natuvchi karta topilmadi"));
+        Card toCard = cardRepository.findByCardNumber(request.getToCardNumber())
+                .orElseThrow(() -> new NotFoundException("Qabul qiluvchi karta topilmadi"));
+
+        validateCardActive(fromCard, "Jo'natuvchi");
+        validateCardActive(toCard, "Qabul qiluvchi");
+
+        Account fromAccount = fromCard.getAccount();
+        Account toAccount = toCard.getAccount();
+
+        validateAccountActive(fromAccount, "Jo'natuvchi");
+        validateAccountActive(toAccount, "Qabul qiluvchi");
+
+        if (!fromAccount.getCurrency().equals(toAccount.getCurrency())) {
+            throw new BadRequestException("Hisoblar valyutasi mos kelmaydi");
+        }
+
+        BigDecimal fee = calculateCardTransferFee(fromAccount, toAccount, request.getAmount());
+        BigDecimal totalDebit = request.getAmount().add(fee);
+
+        if (fromAccount.getBalance().compareTo(totalDebit) < 0) {
+            throw new BadRequestException("Hisobda yetarli mablag' yo'q");
+        }
+
+        fromAccount.setBalance(fromAccount.getBalance().subtract(totalDebit));
+        toAccount.setBalance(toAccount.getBalance().add(request.getAmount()));
+
+        accountRepository.save(fromAccount);
+        accountRepository.save(toAccount);
+
+        Transaction transaction = saveTransaction(fromAccount, toAccount, request.getAmount(), fee, TransactionType.TRANSFER);
+        return toResponse(transaction);
+    }
+
+    @Transactional
+    public TransactionResponse deposit(DepositRequest request) {
+        validateAmount(request.getAmount());
+
+        Account account = accountRepository.findById(request.getAccountId())
+                .orElseThrow(() -> new NotFoundException("Hisob topilmadi"));
+
+        validateAccountActive(account, "Hisob");
+
+        account.setBalance(account.getBalance().add(request.getAmount()));
+        accountRepository.save(account);
+
+        Transaction transaction = saveTransaction(null, account, request.getAmount(), BigDecimal.ZERO, TransactionType.DEPOSIT);
+        return toResponse(transaction);
+    }
+
+    @Transactional
+    public TransactionResponse withdraw(WithdrawRequest request) {
+        validateAmount(request.getAmount());
+
+        Account account = accountRepository.findById(request.getAccountId())
+                .orElseThrow(() -> new NotFoundException("Hisob topilmadi"));
+
+        validateAccountActive(account, "Hisob");
+
+        BigDecimal fee = request.getAmount().multiply(WITHDRAWAL_FEE_RATE).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal totalDebit = request.getAmount().add(fee);
+
+        if (account.getBalance().compareTo(totalDebit) < 0) {
+            throw new BadRequestException("Hisobda yetarli mablag' yo'q");
+        }
+
+        account.setBalance(account.getBalance().subtract(totalDebit));
+        accountRepository.save(account);
+
+        Transaction transaction = saveTransaction(account, null, request.getAmount(), fee, TransactionType.WITHDRAWAL);
+        return toResponse(transaction);
+    }
+
+    @Transactional
+    public TransactionResponse payment(PaymentRequest request) {
+        validateAmount(request.getAmount());
+
+        if (request.getFromAccountId().equals(request.getToAccountId())) {
+            throw new BadRequestException("O'ziga o'zi to'lov qilib bo'lmaydi");
+        }
+
+        Account fromAccount = accountRepository.findById(request.getFromAccountId())
+                .orElseThrow(() -> new NotFoundException("Jo'natuvchi hisob topilmadi"));
+        Account toAccount = accountRepository.findById(request.getToAccountId())
+                .orElseThrow(() -> new NotFoundException("Qabul qiluvchi hisob topilmadi"));
+
+        validateAccountActive(fromAccount, "Jo'natuvchi");
+        validateAccountActive(toAccount, "Qabul qiluvchi");
+
+        if (!fromAccount.getCurrency().equals(toAccount.getCurrency())) {
+            throw new BadRequestException("Hisoblar valyutasi mos kelmaydi");
+        }
+
+        if (fromAccount.getBalance().compareTo(request.getAmount()) < 0) {
+            throw new BadRequestException("Hisobda yetarli mablag' yo'q");
+        }
+
+        fromAccount.setBalance(fromAccount.getBalance().subtract(request.getAmount()));
+        toAccount.setBalance(toAccount.getBalance().add(request.getAmount()));
+
+        accountRepository.save(fromAccount);
+        accountRepository.save(toAccount);
+
+        Transaction transaction = saveTransaction(fromAccount, toAccount, request.getAmount(), BigDecimal.ZERO, TransactionType.PAYMENT);
+        return toResponse(transaction);
+    }
+
+    public List<TransactionResponse> getAccountHistory(Long accountId) {
+        if (!accountRepository.existsById(accountId)) {
+            throw new NotFoundException("Hisob topilmadi");
+        }
+
+        return transactionRepository
+                .findByFromAccountIdOrToAccountIdOrderByCreatedAtDesc(accountId, accountId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    private BigDecimal calculateCardTransferFee(Account from, Account to, BigDecimal amount) {
+        if (from.getOwnerType() == to.getOwnerType() && from.getOwnerId().equals(to.getOwnerId())) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal fee = amount.multiply(CARD_TRANSFER_FEE_RATE).setScale(2, RoundingMode.HALF_UP);
+        return fee.max(MIN_CARD_TRANSFER_FEE);
+    }
+
+    private Transaction saveTransaction(Account from, Account to, BigDecimal amount, BigDecimal fee, TransactionType type) {
+        Transaction transaction = Transaction.builder()
+                .fromAccount(from)
+                .toAccount(to)
+                .amount(amount)
+                .fee(fee)
+                .type(type)
+                .status(TransactionStatus.COMPLETED)
+                .createdAt(LocalDateTime.now())
+                .build();
+        return transactionRepository.save(transaction);
+    }
+
+    private void validateAmount(BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Summa 0 dan katta bo'lishi kerak");
+        }
+    }
+
+    private void validateCardActive(Card card, String role) {
+        if (card.getStatus() != CardStatus.ACTIVE) {
+            throw new BadRequestException(role + " kartasi aktiv emas");
+        }
+    }
+
+    private void validateAccountActive(Account account, String role) {
+        if (account.getStatus() != AccountStatus.ACTIVE) {
+            throw new BadRequestException(role + " hisobi aktiv emas");
+        }
+    }
+
+    private TransactionResponse toResponse(Transaction t) {
+        return TransactionResponse.builder()
+                .id(t.getId())
+                .fromAccountId(t.getFromAccount() != null ? t.getFromAccount().getId() : null)
+                .toAccountId(t.getToAccount() != null ? t.getToAccount().getId() : null)
+                .amount(t.getAmount())
+                .fee(t.getFee())
+                .type(t.getType().name())
+                .status(t.getStatus().name())
+                .createdAt(t.getCreatedAt())
+                .build();
+    }
+}
